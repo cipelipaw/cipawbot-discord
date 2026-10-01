@@ -17,8 +17,8 @@ Bot resmi server Discord **Social High Five**.
 ## Cara Menjalankan di Rumah:
 1. Clone repositori:
    ```bash
-   git clone https://github.com/cipelipaw/edit-discord.git
-   cd edit-discord
+   git clone https://github.com/cipelipaw/cipawbot-discord.git
+   cd cipawbot-discord
    ```
 2. Install dependencies:
    ```bash
