@@ -36,7 +36,31 @@ const client = new Client({
   ]
 });
 
-// Helper: Embed & Buttons Mabar Lobby (Kapasitas Dinamis 2 - 10 Player)
+// Cache untuk foto/banner yang diunggah via Slash Command sebelum Modal submit
+const pendingPhotos = new Map();
+
+// Helper untuk mengambil foto dari Text Input link ATAU dari upload file attachment
+function getAttachedOrLinkedPhoto(interaction, textInputId) {
+  let photoUrl = '';
+  if (textInputId) {
+    try {
+      const val = interaction.fields.getTextInputValue(textInputId)?.trim();
+      if (val && (val.startsWith('http://') || val.startsWith('https://'))) {
+        photoUrl = val;
+      }
+    } catch (_) {}
+  }
+  if (!photoUrl && pendingPhotos.has(interaction.user.id)) {
+    const cached = pendingPhotos.get(interaction.user.id);
+    if (Date.now() - cached.timestamp < 15 * 60 * 1000) {
+      photoUrl = cached.url;
+    }
+  }
+  pendingPhotos.delete(interaction.user.id);
+  return photoUrl;
+}
+
+// Helper: Embed & Buttons Mabar Lobby (Kapasitas Dinamis 2 - 10 Player + Dukungan Banner Foto)
 export function createMabarEmbed(
   hostId, 
   playerIds, 
@@ -45,7 +69,8 @@ export function createMabarEmbed(
   tanggal = 'Sabtu, 18 Oktober 2026',
   judul = 'LOBBY MABAR',
   kapasitas = 5,
-  catatan = ''
+  catatan = '',
+  imageUrl = ''
 ) {
   const maxSlots = Math.min(Math.max(parseInt(kapasitas, 10) || 5, 2), 10);
   const isFull = playerIds.length >= maxSlots;
@@ -85,6 +110,10 @@ export function createMabarEmbed(
     .setFooter({ text: 'Social High Five • Mabar Party System' })
     .setTimestamp();
 
+  if (imageUrl && (imageUrl.startsWith('http://') || imageUrl.startsWith('https://'))) {
+    embed.setImage(imageUrl);
+  }
+
   return embed;
 }
 
@@ -115,7 +144,7 @@ async function safeReply(interaction, content) {
   }
 }
 
-// 1. Registrasi Slash Command: /mabar #channel-tujuan
+// 1. Registrasi Slash Command: /mabar #channel-tujuan [foto]
 const mabarSlashCommand = new SlashCommandBuilder()
   .setName('mabar')
   .setDescription('Buka lobby mabar interaktif (Judul, Tanggal, Waktu, Agenda, & Kapasitas 2-10)')
@@ -123,9 +152,40 @@ const mabarSlashCommand = new SlashCommandBuilder()
     option.setName('channel')
       .setDescription('Pilih channel target untuk mengirimkan ajakan mabar')
       .addChannelTypes(ChannelType.GuildText)
-      .setRequired(true));
+      .setRequired(true))
+  .addAttachmentOption(option =>
+    option.setName('foto')
+      .setDescription('Upload foto/banner ajakan mabar (opsional)')
+      .setRequired(false));
 
-// 2. Registrasi Slash Command: /bcall #channel-tujuan
+// Alias /buatmabar & /lobby
+const buatMabarCommand = new SlashCommandBuilder()
+  .setName('buatmabar')
+  .setDescription('Buka form ajakan mabar interaktif (Kapasitas 2-10 player)')
+  .addChannelOption(option =>
+    option.setName('channel')
+      .setDescription('Pilih channel target untuk mengirimkan ajakan mabar')
+      .addChannelTypes(ChannelType.GuildText)
+      .setRequired(true))
+  .addAttachmentOption(option =>
+    option.setName('foto')
+      .setDescription('Upload foto/banner ajakan mabar (opsional)')
+      .setRequired(false));
+
+const lobbyCommand = new SlashCommandBuilder()
+  .setName('lobby')
+  .setDescription('Buka form lobby mabar interaktif (Kapasitas 2-10 player)')
+  .addChannelOption(option =>
+    option.setName('channel')
+      .setDescription('Pilih channel target untuk mengirimkan ajakan mabar')
+      .addChannelTypes(ChannelType.GuildText)
+      .setRequired(true))
+  .addAttachmentOption(option =>
+    option.setName('foto')
+      .setDescription('Upload foto/banner ajakan mabar (opsional)')
+      .setRequired(false));
+
+// 2. Registrasi Slash Command: /bcall #channel-tujuan [foto]
 const bcallCommand = new SlashCommandBuilder()
   .setName('bcall')
   .setDescription('Broadcast informasi game / pengumuman penting ke channel pilihan')
@@ -133,9 +193,13 @@ const bcallCommand = new SlashCommandBuilder()
     option.setName('channel')
       .setDescription('Pilih channel target untuk mengirimkan informasi')
       .addChannelTypes(ChannelType.GuildText)
-      .setRequired(true));
+      .setRequired(true))
+  .addAttachmentOption(option =>
+    option.setName('foto')
+      .setDescription('Upload foto/banner pengumuman (opsional)')
+      .setRequired(false));
 
-// 3. Registrasi Slash Command: /bcsta1 #channel-tujuan
+// 3. Registrasi Slash Command: /bcsta1 #channel-tujuan [foto]
 const bcsta1Command = new SlashCommandBuilder()
   .setName('bcsta1')
   .setDescription('Broadcast jadwal mabar Survive The Apocalypse ke channel pilihan')
@@ -143,18 +207,22 @@ const bcsta1Command = new SlashCommandBuilder()
     option.setName('channel')
       .setDescription('Pilih channel target untuk mengirim pengumuman mabar')
       .addChannelTypes(ChannelType.GuildText)
-      .setRequired(true));
+      .setRequired(true))
+  .addAttachmentOption(option =>
+    option.setName('foto')
+      .setDescription('Upload foto/poster jadwal mabar (opsional)')
+      .setRequired(false));
 
 client.on('clientReady', async () => {
   console.log(`===========================================`);
   console.log(`🤖 Bot Cipaw SIAP & AKTIF! (${client.user.tag})`);
-  console.log(`Fitur Aktif: Verifikasi Member, Role Picker, /mabar (Modal 2-10p), /bcall (Game Info), & /bcsta1.`);
+  console.log(`Fitur Aktif: Verifikasi Member, Role Picker, /buatmabar, /lobby, /mabar, /bcall, & /bcsta1.`);
   console.log(`===========================================`);
 
   try {
     const guild = await client.guilds.fetch(env.GUILD_ID);
-    await guild.commands.set([mabarSlashCommand, bcallCommand, bcsta1Command]);
-    console.log('✅ Slash commands /mabar, /bcall, & /bcsta1 berhasil didaftarkan ke server!');
+    await guild.commands.set([buatMabarCommand, lobbyCommand, mabarSlashCommand, bcallCommand, bcsta1Command]);
+    console.log('✅ Slash commands /buatmabar, /lobby, /mabar, /bcall, & /bcsta1 berhasil didaftarkan ke server!');
   } catch (err) {
     console.error('Gagal mendaftarkan slash commands:', err);
   }
@@ -246,8 +314,17 @@ client.on('interactionCreate', async (interaction) => {
       });
     }
 
-    // 1. Command /mabar #channel-tujuan (Modal Mabar dengan Kapasitas 2-10)
-    if (interaction.commandName === 'mabar') {
+    // Tangkap attachment foto (jika ada yang diunggah langsung di command)
+    const fotoAttachment = interaction.options.getAttachment('foto');
+    if (fotoAttachment && fotoAttachment.url) {
+      pendingPhotos.set(interaction.user.id, {
+        url: fotoAttachment.url,
+        timestamp: Date.now()
+      });
+    }
+
+    // 1. Command /buatmabar, /lobby, /mabar #channel-tujuan (Modal Mabar dengan Kapasitas 2-10)
+    if (interaction.commandName === 'mabar' || interaction.commandName === 'buatmabar' || interaction.commandName === 'lobby') {
       const modal = new ModalBuilder()
         .setCustomId(`modal_mabar_${targetChannel.id}`)
         .setTitle('🎮 Form Ajakan Mabar');
@@ -329,10 +406,18 @@ client.on('interactionCreate', async (interaction) => {
         .setPlaceholder('Contoh: Link patch notes atau instruksi tambahan')
         .setRequired(false);
 
+      const fotoInput = new TextInputBuilder()
+        .setCustomId('bcall_foto')
+        .setLabel('Link Foto / Banner (Opsional)')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder('https://... (atau upload langsung saat ketik /bcall)')
+        .setRequired(false);
+
       modal.addComponents(
         new ActionRowBuilder().addComponents(judulInput),
         new ActionRowBuilder().addComponents(infoInput),
-        new ActionRowBuilder().addComponents(catatanInput)
+        new ActionRowBuilder().addComponents(catatanInput),
+        new ActionRowBuilder().addComponents(fotoInput)
       );
 
       return interaction.showModal(modal);
@@ -374,11 +459,19 @@ client.on('interactionCreate', async (interaction) => {
         .setPlaceholder('Contoh: Wajib bawa senjata level 3!')
         .setRequired(false);
 
+      const fotoInput = new TextInputBuilder()
+        .setCustomId('bc_foto')
+        .setLabel('Link Foto / Banner (Opsional)')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder('https://... (atau upload langsung saat ketik /bcsta1)')
+        .setRequired(false);
+
       modal.addComponents(
         new ActionRowBuilder().addComponents(tanggalInput),
         new ActionRowBuilder().addComponents(jamInput),
         new ActionRowBuilder().addComponents(agendaInput),
-        new ActionRowBuilder().addComponents(catatanInput)
+        new ActionRowBuilder().addComponents(catatanInput),
+        new ActionRowBuilder().addComponents(fotoInput)
       );
 
       return interaction.showModal(modal);
@@ -405,7 +498,8 @@ client.on('interactionCreate', async (interaction) => {
       const hostId = interaction.user.id;
       const playerIds = [hostId];
 
-      const embed = createMabarEmbed(hostId, playerIds, agenda, waktu, tanggal, judul, kapasitas);
+      const imageUrl = getAttachedOrLinkedPhoto(interaction, null);
+      const embed = createMabarEmbed(hostId, playerIds, agenda, waktu, tanggal, judul, kapasitas, '', imageUrl);
       const row = createMabarButtons(false);
 
       const targetChannel = await interaction.guild.channels.fetch(targetChannelId).catch(() => null);
@@ -436,6 +530,7 @@ client.on('interactionCreate', async (interaction) => {
       const judul = interaction.fields.getTextInputValue('bcall_judul').trim();
       const info = interaction.fields.getTextInputValue('bcall_info').trim();
       const catatan = interaction.fields.getTextInputValue('bcall_catatan')?.trim();
+      const imageUrl = getAttachedOrLinkedPhoto(interaction, 'bcall_foto');
 
       const targetChannel = await interaction.guild.channels.fetch(targetChannelId).catch(() => null);
       if (!targetChannel) {
@@ -459,6 +554,10 @@ client.on('interactionCreate', async (interaction) => {
         .setFooter({ text: 'Social High Five • Game Information Broadcast' })
         .setTimestamp();
 
+      if (imageUrl) {
+        infoEmbed.setImage(imageUrl);
+      }
+
       const sentMsg = await targetChannel.send({
         content: '@everyone',
         embeds: [infoEmbed]
@@ -477,11 +576,12 @@ client.on('interactionCreate', async (interaction) => {
       const jam = interaction.fields.getTextInputValue('bc_jam').trim();
       const agenda = interaction.fields.getTextInputValue('bc_agenda').trim();
       const catatan = interaction.fields.getTextInputValue('bc_catatan')?.trim() || '';
+      const imageUrl = getAttachedOrLinkedPhoto(interaction, 'bc_foto');
 
       const hostId = interaction.user.id;
       const playerIds = [hostId];
 
-      const embed = createMabarEmbed(hostId, playerIds, agenda, jam, tanggal, 'LOBBY MABAR: SURVIVE THE APOCALYPSE', 5, catatan);
+      const embed = createMabarEmbed(hostId, playerIds, agenda, jam, tanggal, 'LOBBY MABAR: SURVIVE THE APOCALYPSE', 5, catatan, imageUrl);
       const row = createMabarButtons(false);
 
       const targetChannel = await interaction.guild.channels.fetch(targetChannelId).catch(() => null);
@@ -637,11 +737,13 @@ client.on('interactionCreate', async (interaction) => {
         return safeReply(interaction, `❌ Maaf, kuota squad sudah penuh (${maxSlots}/${maxSlots})!`);
       }
 
+      const imageUrl = embed.image?.url || '';
+
       // Masukkan user baru ke slot
       playerIds.push(interaction.user.id);
       const isFull = playerIds.length >= maxSlots;
 
-      const newEmbed = createMabarEmbed(hostId, playerIds, agenda, jam, tanggal, judul, maxSlots, catatan);
+      const newEmbed = createMabarEmbed(hostId, playerIds, agenda, jam, tanggal, judul, maxSlots, catatan, imageUrl);
       const newRow = createMabarButtons(isFull);
 
       await interaction.update({ embeds: [newEmbed], components: [newRow] });
@@ -690,10 +792,12 @@ client.on('interactionCreate', async (interaction) => {
         return safeReply(interaction, '⚠️ Kamu belum terdaftar di dalam squad ini.');
       }
 
+      const imageUrl = embed.image?.url || '';
+
       // Hapus player dari slot
       playerIds = playerIds.filter(id => id !== interaction.user.id);
 
-      const newEmbed = createMabarEmbed(hostId, playerIds, agenda, jam, tanggal, judul, maxSlots, catatan);
+      const newEmbed = createMabarEmbed(hostId, playerIds, agenda, jam, tanggal, judul, maxSlots, catatan, imageUrl);
       const newRow = createMabarButtons(false); // Tombol ikutan pasti aktif kembali karena ada slot kosong
 
       await interaction.update({ embeds: [newEmbed], components: [newRow] });
